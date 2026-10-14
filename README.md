@@ -1,6 +1,21 @@
 # Picowinder: RP2040-based USB adapter for the Microsoft Sidewinder Force Feedback Pro joystick
 Picowinder is an adapter that uses an RP2040 (i.e., a Raspberry Pi Pico) to turn the [Microsoft Sidewinder Force Feedback Pro joystick](https://www.youtube.com/watch?v=evwn435x0dM) into a USB joystick, including force-feedback communication.
 
+# About this fork
+
+This fork is set up for gliding in [Condor 3](https://www.condorsoaring.com/): long flights with the trim spring active, trimming for speed with "move stick with trim", and thermalling with light inputs. It is a fork of [NolanNicholson/picowinder](https://github.com/NolanNicholson/picowinder).
+
+Changes from the original:
+
+* **No more lockups mid-flight.** The original firmware could leave the joystick dead 10-25 minutes into a force-feedback session ([issue #9](https://github.com/NolanNicholson/picowinder/issues/9)). Joystick reads and MIDI commands no longer overlap, the base gets the full start-up sequence the Windows driver sends, and if it does stop answering it is restarted and its effects restored without the game noticing.
+* **Pitch trim works.** The pitch spring offset was inverted, so trim pulled the wrong way. `PITCH_CENTRE_SHIFT` in `config.h` also corrects where the base centres its pitch spring (set it to 0 for plain passthrough, and re-measure for another stick).
+* **No hands-off oscillation.** Condor asks for a stiff spring, which can make the stick oscillate on its own when the hand sensor is bypassed. The firmware detects that, briefly cuts the spring and damps the stick, then brings the spring back. It only ever reduces force and never changes what the game reads. Turn it off with `OSCILLATION_GOVERNOR` in `config.h`.
+* **Force levels are passed through as the game sends them.**
+
+Build without `EXAMPLE_EFFECTS` (comment it out in `config.h`) for Condor.
+
+To flash this firmware, power the joystick base off first: the base can keep the Pico powered through the GamePort, which stops it entering BOOTSEL mode.
+
 # Compatibility
 Picowinder is compatible with both Linux and Windows. It has not been tested elsewhere.
 
