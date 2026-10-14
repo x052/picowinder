@@ -56,6 +56,9 @@ target_sources(picowinder PUBLIC
         ${CMAKE_CURRENT_LIST_DIR}/usb_descriptors.c
         ${CMAKE_CURRENT_LIST_DIR}/ffb_midi.c
         ${CMAKE_CURRENT_LIST_DIR}/main.c
+        ${CMAKE_CURRENT_LIST_DIR}/watchdog.c
+        ${CMAKE_CURRENT_LIST_DIR}/bus.c
+        ${CMAKE_CURRENT_LIST_DIR}/governor.c
         )
 
 pico_set_program_name(picowinder "picowinder")

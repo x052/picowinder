@@ -1,7 +1,15 @@
+#include <string.h>
+
 #include "tusb.h"
 #include "usb_report_ids.h"
 
 #include "ffb_midi.h"
+#include "diag.h"
+#include "config.h"
+
+#ifndef PITCH_CENTRE_SHIFT
+#define PITCH_CENTRE_SHIFT 0
+#endif
 
 
 // Translate from index in USB descriptor to byte that Sidewinder MIDI expects
@@ -20,6 +28,12 @@ static const uint8_t effect_type_usb_to_midi[] =
     MIDI_ET_INERTIA,
     MIDI_ET_FRICTION
 };
+
+// USB effect type index -> MIDI type; MIDI_ET_NONE for anything out of range.
+static uint8_t usb_effect_type_to_midi(uint8_t usb_type)
+{
+    return usb_type < sizeof(effect_type_usb_to_midi) ? effect_type_usb_to_midi[usb_type] : MIDI_ET_NONE;
+}
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
         hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
@@ -51,6 +65,20 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
                     // Bit 6: 1 for supporting shared parameter blocks, 0 for not
                     buffer[3] = 0xff;
                     return 4;
+
+                case REPORT_ID_FEATURE_DIAG:
+                {
+                    uint16_t n = reqlen < sizeof(diag) ? reqlen : sizeof(diag);
+                    memcpy(buffer, &diag, n);
+                    return n;
+                }
+
+                case REPORT_ID_FEATURE_HANG_LOG:
+                {
+                    uint16_t n = reqlen < sizeof(hang_log) ? reqlen : sizeof(hang_log);
+                    memcpy(buffer, &hang_log, n);
+                    return n;
+                }
             }
 
             break;
@@ -98,8 +126,6 @@ struct __attribute__((__packed__ )) t_set_ramp_report
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
         hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
 {
-    bool echo = true;
-
     switch (report_type)
     {
         case HID_REPORT_TYPE_OUTPUT:
@@ -128,7 +154,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                     // TODO use ax0 enable
                     // TODO use ax1 enable
 
-                    uint8_t effect_type_midi = effect_type_usb_to_midi[effect_type_usb];
+                    uint8_t effect_type_midi = usb_effect_type_to_midi(effect_type_usb);
 
                     // MIDI duration is in "units of 2 ms".
                     // USB uses the max possible value for infinity. MIDI uses 0.
@@ -188,14 +214,21 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                         case 0:
                         {
                             ffb_midi_modify(uart0, report->effect_id, MODIFY_OFFSET_X, report->center_point_offset);
-                            ffb_midi_modify(uart0, report->effect_id, MODIFY_STRENGTH_X, report->pos_coefficient >> 1);
+                            ffb_midi_set_condition_strength(uart0, report->effect_id, 0, report->pos_coefficient >> 1);
 
                             break;
                         }
                         case 1:
                         {
-                            ffb_midi_modify(uart0, report->effect_id, MODIFY_OFFSET_Y, report->center_point_offset);
-                            ffb_midi_modify(uart0, report->effect_id, MODIFY_STRENGTH_Y, report->pos_coefficient >> 1);
+                            // Apply PITCH_CENTRE_SHIFT (config.h), then negate: the FFB
+                            // Pro's Y offset runs opposite to its reported Y axis
+                            // (adapt-ffb-joy negates it too).
+                            int offset = report->center_point_offset + PITCH_CENTRE_SHIFT;
+                            if (offset > 127) { offset = 127; }
+                            if (offset < -127) { offset = -127; }
+                            int8_t offset_y = (int8_t)-offset;
+                            ffb_midi_modify(uart0, report->effect_id, MODIFY_OFFSET_Y, offset_y);
+                            ffb_midi_set_condition_strength(uart0, report->effect_id, 1, report->pos_coefficient >> 1);
 
                             break;
                         }
@@ -281,7 +314,19 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
 
                 case REPORT_ID_OUTPUT_DEVICE_CONTROL:
                 {
-                    // TODO
+                    // 1 Enable Actuators, 2 Disable Actuators, 3 Stop All
+                    // Effects, 4 Reset, 5 Pause, 6 Continue (per descriptor).
+                    // DirectInput sends Reset when a game (re)acquires the
+                    // device, then recreates its effects.
+                    switch (buffer[0])
+                    {
+                        case 3:
+                            ffb_midi_stop_all(uart0);
+                            break;
+                        case 4:
+                            ffb_midi_reset_all(uart0);
+                            break;
+                    }
 
                     break;
                 }
@@ -299,11 +344,24 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
         {
             switch(report_id)
             {
+                case REPORT_ID_FEATURE_DIAG:
+                {
+                    // Commands: 1 = device reset (stock auto-center comes back
+                    // on, as after a base reset), 2 = clear the counters,
+                    // 3 = simulate a ~150 ms data dropout, 9 0xb7 = reboot into
+                    // the USB bootloader.
+                    if (bufsize >= 1 && buffer[0] == 1) { ffb_midi_device_control(uart0, MIDI_DC_RESET); }
+                    if (bufsize >= 1 && buffer[0] == 2) { memset(&diag, 0, sizeof(diag)); }
+                    if (bufsize >= 1 && buffer[0] == 3) { diag_simulate_dropout = true; }
+                    if (bufsize >= 2 && buffer[0] == 9 && buffer[1] == 0xb7) { diag_reboot_to_bootsel = true; }
+                    break;
+                }
+
                 case REPORT_ID_FEATURE_CREATE_NEW_EFFECT:
                 {
                     // Only one byte: the effect type
                     struct Effect newEffect = {
-                        .type = effect_type_usb_to_midi[buffer[0]],
+                        .type = usb_effect_type_to_midi(buffer[0]),
                         .duration = 0,
                         .button_mask = 0,
                         .direction = 0,
@@ -329,7 +387,4 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
             break;
         }
     }
-
-    // Echo back anything we received from the host
-    if (echo) { tud_hid_report(0, buffer, bufsize); }
 }

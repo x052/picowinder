@@ -17,6 +17,17 @@ These can be configured somewhat, but:
 // Disable the Sidewinder's default auto-center effect.
 #define DISABLE_AUTO_CENTER
 
+// Pitch spring centre correction, in DirectInput offset units (-128..127, about
+// 4 stick counts each). The base used for development centred its spring about
+// 36 counts forward of where the game asked; +9 corrects that. Use 0 for pure
+// passthrough, and re-measure for another stick.
+#define PITCH_CENTRE_SHIFT 9
+
+// Oscillation governor: if the stick oscillates by itself (possible with the
+// hand sensor bypassed and a stiff spring), briefly cut the spring and damp it,
+// then ramp the spring back. Only ever reduces force. See governor.h.
+#define OSCILLATION_GOVERNOR
+
 // Add some example effects: a trigger kickback, and a gentler auto-center effect.
 #define EXAMPLE_EFFECTS
 

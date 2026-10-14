@@ -90,19 +90,46 @@ struct Effect
 // Use this as an effect ID to manipulate all effects at once
 #define MIDI_ALL_EFFECTS 0x7f
 
+// Device control (MIDI program change 0xc5) values, per adapt-ffb-joy.
+#define MIDI_DC_RESET       0x01   // stop and free all effects, gain max, actuators on, stock auto-center on
+#define MIDI_DC_ACTUATORS_ON  0x02
+#define MIDI_DC_ACTUATORS_OFF 0x03
+#define MIDI_DC_CONTINUE    0x04
+#define MIDI_DC_PAUSE       0x05
+#define MIDI_DC_STOP_ALL    0x06   // stop all effects, including the stock auto-center
+
+
+// All MIDI to the base goes through this. The firmware queues the bytes for
+// release between joystick reads (see bus.h); the host tests capture them.
+void midi_write(uart_inst_t *uart, const uint8_t *data, size_t len);
 
 int ffb_midi_get_free_effect_id();
 size_t ffb_midi_get_num_available_effects();
 bool ffb_midi_last_add_succeeded();
 uint8_t ffb_midi_last_assigned_effect_id();
 
-void ffb_midi_set_autocenter(uart_inst_t *uart, bool enabled);
 int ffb_midi_define_effect(uart_inst_t *uart, struct Effect *effect);
 void ffb_midi_erase(uart_inst_t *uart, int effect_id);
+void ffb_midi_device_control(uart_inst_t *uart, uint8_t midi_control_value);
+void ffb_midi_free_all_effects(void);
+void ffb_midi_replay_state(uart_inst_t *uart);
+void ffb_midi_stop_all(uart_inst_t *uart);
+void ffb_midi_reset_all(uart_inst_t *uart);
 void ffb_midi_play_solo(uart_inst_t *uart, int effect_id);
 void ffb_midi_play(uart_inst_t *uart, int effect_id);
 void ffb_midi_pause(uart_inst_t *uart, int effect_id);
 void ffb_midi_modify(uart_inst_t *uart, int effect_id, uint8_t param, uint16_t value);
+
+// Condition-effect strength from the host; springs are scaled by the governor.
+#define GOV_DAMPER_STRENGTH 0x30   // MIDI strength of the governor's own damper
+void ffb_midi_set_condition_strength(uart_inst_t *uart, int effect_id, int axis, uint16_t strength);
+void ffb_midi_set_spring_scale(uart_inst_t *uart, uint16_t permille);
+uint16_t ffb_midi_spring_scale(void);
+// Play (on) or pause the governor's own damper effect, creating it if needed.
+// Returns its slot, or -1.
+int ffb_midi_governor_damper(uart_inst_t *uart, bool on);
+// Is any effect other than the governor's own damper playing?
+bool ffb_midi_host_effects_playing(void);
 
 
 #endif //FFB_MIDI_H
